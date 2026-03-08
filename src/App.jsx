@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as faceapi from "face-api.js";
 
 export default function App() {
@@ -6,21 +6,17 @@ export default function App() {
   const [scale, setScale] = useState(1);
   const [baseScale, setBaseScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [defaultScale, setDefaultScale] = useState(1);
+  const [defaultPosition, setDefaultPosition] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
   const [start, setStart] = useState({ x: 0, y: 0 });
   const [status, setStatus] = useState("Loading face detection model...");
   const [faceStatus, setFaceStatus] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const previewImgRef = useRef(null);
   const pendingAutoAdjustRef = useRef(null);
-  const frameRef = useRef(null);
   const pinchStartDistance = useRef(null);
   const pinchStartScale = useRef(1);
-  const pinchStartPosition = useRef({ x: 0, y: 0 });
-  const pinchCenterStart = useRef({ x: 0, y: 0 });
-  const [defaultScale, setDefaultScale] = useState(1);
-  const [defaultPosition, setDefaultPosition] = useState({ x: 0, y: 0 });
 
   const frameWidth = 300;
   const frameHeight = 400;
@@ -46,15 +42,14 @@ export default function App() {
   const resizeImageForProcessing = (file) => {
     return new Promise((resolve, reject) => {
       const original = new Image();
+
       original.onload = () => {
         const maxSide = 1200;
-        let { width, height } = original;
-
-        const largestSide = Math.max(width, height);
+        const largestSide = Math.max(original.width, original.height);
         const resizeRatio = largestSide > maxSide ? maxSide / largestSide : 1;
 
-        const newWidth = Math.round(width * resizeRatio);
-        const newHeight = Math.round(height * resizeRatio);
+        const newWidth = Math.round(original.width * resizeRatio);
+        const newHeight = Math.round(original.height * resizeRatio);
 
         const canvas = document.createElement("canvas");
         canvas.width = newWidth;
@@ -100,7 +95,6 @@ export default function App() {
       const imageUrl = processed.dataUrl;
 
       const fitScale = Math.min(frameWidth / img.width, frameHeight / img.height);
-      setBaseScale(fitScale);
 
       let autoScale = 1;
       let autoX = 0;
@@ -148,8 +142,9 @@ export default function App() {
 
         setStatus("Face detected and auto-positioned.");
       } else {
-        setScale(1);
-        setPosition({ x: 0, y: 0 });
+        autoScale = 1;
+        autoX = 0;
+        autoY = 0;
         setFaceStatus("");
         setStatus("No face detected. You can still drag manually.");
       }
@@ -185,19 +180,6 @@ export default function App() {
     });
   };
 
-  const getTouchMidpoint = (touches) => {
-    return {
-      x: (touches[0].clientX + touches[1].clientX) / 2,
-      y: (touches[0].clientY + touches[1].clientY) / 2,
-    };
-  };
-
-  const getTouchDistance = (touches) => {
-    const dx = touches[0].clientX - touches[1].clientX;
-    const dy = touches[0].clientY - touches[1].clientY;
-    return Math.hypot(dx, dy);
-  };
-
   const startDrag = (clientX, clientY) => {
     setDragging(true);
     setStart({
@@ -220,58 +202,37 @@ export default function App() {
 
   const handleMouseDown = (e) => startDrag(e.clientX, e.clientY);
   const handleMouseMove = (e) => moveDrag(e.clientX, e.clientY);
+
+  const getTouchDistance = (touches) => {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+
   const handleTouchStart = (e) => {
     if (e.touches.length === 1) {
       const touch = e.touches[0];
       startDrag(touch.clientX, touch.clientY);
     } else if (e.touches.length === 2) {
-      e.preventDefault();
       setDragging(false);
-
       pinchStartDistance.current = getTouchDistance(e.touches);
       pinchStartScale.current = scale;
-      pinchStartPosition.current = { ...position };
-      pinchCenterStart.current = getTouchMidpoint(e.touches);
     }
   };
+
   const handleTouchMove = (e) => {
     if (e.touches.length === 1 && dragging) {
       const touch = e.touches[0];
       moveDrag(touch.clientX, touch.clientY);
     } else if (e.touches.length === 2) {
       e.preventDefault();
-
       const currentDistance = getTouchDistance(e.touches);
-      if (!pinchStartDistance.current || !frameRef.current) return;
 
-      const zoomFactor = currentDistance / pinchStartDistance.current;
-      const newScale = Math.max(0.8, Math.min(pinchStartScale.current * zoomFactor, 3));
-
-      const rect = frameRef.current.getBoundingClientRect();
-      const currentMid = getTouchMidpoint(e.touches);
-
-      const startMidX = pinchCenterStart.current.x - rect.left;
-      const startMidY = pinchCenterStart.current.y - rect.top;
-
-      const frameCenterX = rect.width / 2;
-      const frameCenterY = rect.height / 2;
-
-      const worldX =
-        (startMidX - frameCenterX - pinchStartPosition.current.x) /
-        (baseScale * pinchStartScale.current);
-
-      const worldY =
-        (startMidY - frameCenterY - pinchStartPosition.current.y) /
-        (baseScale * pinchStartScale.current);
-
-      const newPositionX = startMidX - frameCenterX - worldX * (baseScale * newScale);
-      const newPositionY = startMidY - frameCenterY - worldY * (baseScale * newScale);
-
-      setScale(newScale);
-      setPosition({
-        x: newPositionX,
-        y: newPositionY,
-      });
+      if (pinchStartDistance.current) {
+        const zoomFactor = currentDistance / pinchStartDistance.current;
+        const newScale = pinchStartScale.current * zoomFactor;
+        setScale(Math.max(0.8, Math.min(newScale, 3)));
+      }
     }
   };
 
@@ -326,6 +287,7 @@ export default function App() {
       link.click();
       document.body.removeChild(link);
     };
+
     img.src = image;
   };
 
@@ -344,8 +306,6 @@ export default function App() {
       }}
       onMouseMove={handleMouseMove}
       onMouseUp={stopDrag}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
     >
       <div
         style={{
@@ -420,7 +380,6 @@ export default function App() {
 
             <div style={{ marginTop: "20px", textAlign: "center" }}>
               <div
-                ref={frameRef}
                 style={{
                   width: `${frameWidth}px`,
                   height: `${frameHeight}px`,
@@ -433,9 +392,11 @@ export default function App() {
                   touchAction: "none",
                   maxWidth: "100%",
                 }}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
               >
                 <img
-                  ref={previewImgRef}
                   src={image}
                   alt="preview"
                   onLoad={handlePreviewImageLoad}
@@ -449,7 +410,7 @@ export default function App() {
                     userSelect: "none",
                     maxWidth: "none",
                     maxHeight: "none",
-                    /* pointerEvents must be enabled for mouse drag */
+                    pointerEvents: "none",
                   }}
                 />
 
