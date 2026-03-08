@@ -449,7 +449,7 @@ export default function App() {
                     userSelect: "none",
                     maxWidth: "none",
                     maxHeight: "none",
-                    pointerEvents: "none",
+                    /* pointerEvents must be enabled for mouse drag */
                   }}
                 />
 
