@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as faceapi from "face-api.js";
+import { removeBackground } from "@imgly/background-removal";
 
 export default function App() {
   const [image, setImage] = useState(null);
@@ -13,6 +14,7 @@ export default function App() {
   const [status, setStatus] = useState("Loading face detection model...");
   const [faceStatus, setFaceStatus] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [checks, setChecks] = useState([]);
 
   const pendingAutoAdjustRef = useRef(null);
   const pinchStartDistance = useRef(null);
@@ -76,6 +78,55 @@ export default function App() {
     });
   };
 
+  const checkBackground = (img) => {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+
+    canvas.width = img.width;
+    canvas.height = img.height;
+
+    ctx.drawImage(img, 0, 0);
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+
+    let totalBrightness = 0;
+    let samples = 0;
+
+    for (let i = 0; i < imageData.length; i += 40) {
+      const r = imageData[i];
+      const g = imageData[i + 1];
+      const b = imageData[i + 2];
+
+      const brightness = (r + g + b) / 3;
+
+      totalBrightness += brightness;
+      samples++;
+    }
+
+    const avgBrightness = totalBrightness / samples;
+
+    if (avgBrightness < 150) {
+      return "Background may be too dark for passport requirements.";
+    }
+
+    if (avgBrightness > 240) {
+      return "Background looks very bright (likely acceptable).";
+    }
+
+    return "Background brightness looks acceptable.";
+  };
+
+  const removePhotoBackground = async (imageUrl) => {
+    try {
+      const blob = await removeBackground(imageUrl);
+      const newUrl = URL.createObjectURL(blob);
+      return newUrl;
+    } catch (error) {
+      console.error("Background removal failed:", error);
+      return imageUrl;
+    }
+  };
+
   const handleUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -84,6 +135,7 @@ export default function App() {
       setIsProcessing(true);
       setStatus("Preparing image...");
       setFaceStatus("");
+      setChecks([]);
       setImage(null);
       setScale(1);
       setPosition({ x: 0, y: 0 });
@@ -92,7 +144,10 @@ export default function App() {
 
       const processed = await resizeImageForProcessing(file);
       const img = processed.img;
-      const imageUrl = processed.dataUrl;
+      const backgroundResult = checkBackground(img);
+      let imageUrl = processed.dataUrl;
+
+      imageUrl = await removePhotoBackground(imageUrl);
 
       const fitScale = Math.min(frameWidth / img.width, frameHeight / img.height);
 
@@ -112,6 +167,40 @@ export default function App() {
 
       if (detection) {
         const box = detection.box;
+
+        const checkResults = [];
+
+        checkResults.push(backgroundResult);
+
+        const faceHeightRatio = box.height / img.height;
+        const faceCenterXRatio = (box.x + box.width / 2) / img.width;
+        const faceCenterYRatio = (box.y + box.height / 2) / img.height;
+
+        if (faceHeightRatio < 0.25) {
+          checkResults.push("Face looks too small in the original photo.");
+        } else if (faceHeightRatio > 0.55) {
+          checkResults.push("Face looks too large in the original photo.");
+        } else {
+          checkResults.push("Face size looks acceptable.");
+        }
+
+        if (faceCenterXRatio < 0.4) {
+          checkResults.push("Face is too far left in the original photo.");
+        } else if (faceCenterXRatio > 0.6) {
+          checkResults.push("Face is too far right in the original photo.");
+        } else {
+          checkResults.push("Face is horizontally well centered.");
+        }
+
+        if (faceCenterYRatio < 0.35) {
+          checkResults.push("Face is too high in the original photo.");
+        } else if (faceCenterYRatio > 0.55) {
+          checkResults.push("Face is too low in the original photo.");
+        } else {
+          checkResults.push("Face is vertically well placed.");
+        }
+
+        setChecks(checkResults);
 
         const targetFaceHeight = frameHeight * 0.72;
         const currentFaceHeight = box.height * fitScale;
@@ -146,6 +235,7 @@ export default function App() {
         autoX = 0;
         autoY = 0;
         setFaceStatus("");
+        setChecks(["No face detected, so compliance checks could not be completed."]);
         setStatus("No face detected. You can still drag manually.");
       }
 
@@ -330,6 +420,25 @@ export default function App() {
         <p style={{ color: "blue", fontWeight: "bold", textAlign: "center" }}>
           {faceStatus}
         </p>
+
+        {checks.length > 0 && (
+          <div
+            style={{
+              background: "#f8f8f8",
+              border: "1px solid #ddd",
+              borderRadius: "12px",
+              padding: "12px",
+              margin: "12px 0",
+            }}
+          >
+            <p style={{ fontWeight: "bold", marginTop: 0 }}>Photo checks:</p>
+            {checks.map((check, index) => (
+              <p key={index} style={{ margin: "6px 0", fontSize: "14px", color: "#333" }}>
+                {check}
+              </p>
+            ))}
+          </div>
+        )}
 
         <p
           style={{
