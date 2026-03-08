@@ -410,7 +410,6 @@ export default function App() {
                     userSelect: "none",
                     maxWidth: "none",
                     maxHeight: "none",
-                    pointerEvents: "none",
                   }}
                 />
 
